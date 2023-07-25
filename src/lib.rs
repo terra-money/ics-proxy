@@ -1,5 +1,7 @@
+mod amount;
 pub mod contract;
 mod error;
+mod ibc;
 pub mod state;
 
 pub use crate::error::ContractError;
@@ -11,6 +13,8 @@ use cosmwasm_std::{Addr, CosmosMsg};
 pub struct Config {
     pub owner: Option<Addr>,
     pub whitelist: Option<Vec<Addr>>,
+    pub default_timeout: u64,
+    pub default_gas_limit: Option<u64>,
 }
 
 #[cw_serde]
@@ -18,6 +22,8 @@ pub struct InstantiateMsg {
     pub owner: Option<String>,
     pub whitelist: Option<Vec<String>>,
     pub msgs: Option<Vec<CosmosMsg>>,
+    pub default_timeout: u64,
+    pub default_gas_limit: Option<u64>,
 }
 
 #[cw_serde]

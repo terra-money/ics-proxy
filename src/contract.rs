@@ -5,7 +5,6 @@ use cosmwasm_std::{
     entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdResult,
 };
 
-
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
     deps: DepsMut,
@@ -37,6 +36,8 @@ pub fn instantiate(
         &Config {
             owner: owner.clone(),
             whitelist: whitelist.clone(),
+            default_timeout: msg.default_timeout,
+            default_gas_limit: msg.default_gas_limit,
         },
     )?;
 
@@ -120,6 +121,8 @@ pub fn update_whitelist(
         &Config {
             owner: config.owner,
             whitelist: updated_whitelist.clone(),
+            default_timeout: config.default_timeout,
+            default_gas_limit: config.default_gas_limit,
         },
     )?;
 
@@ -155,6 +158,8 @@ pub fn update_owner(
         &Config {
             owner: updated_owner.clone(),
             whitelist: config.whitelist,
+            default_timeout: config.default_timeout,
+            default_gas_limit: config.default_gas_limit,
         },
     )?;
 
