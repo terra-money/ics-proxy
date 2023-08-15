@@ -2,10 +2,13 @@ pub mod contract;
 mod error;
 pub mod state;
 
+#[cfg(test)]
+mod tests;
+
 pub use crate::error::ContractError;
 
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, CosmosMsg};
+use cosmwasm_std::{Addr, CosmosMsg, Event};
 
 #[cw_serde]
 pub struct Config {
@@ -25,11 +28,35 @@ pub enum ExecuteMsg {
     ExecuteMsgs(ExecuteMsgsMsg),
     UpdateWhitelist(UpdateWhitelistMsg),
     UpdateOwner(UpdateOwnerMsg),
+
+    ExecuteMsgCallback(ExecuteMsgReplyCallbackMsg),
 }
 
 #[cw_serde]
 pub struct ExecuteMsgsMsg {
-    pub msgs: Vec<CosmosMsg>,
+    pub msgs: Vec<ExecuteMsgInfo>,
+}
+
+#[cw_serde]
+pub struct ExecuteMsgInfo {
+    pub msg: CosmosMsg,
+    pub reply_callback: Option<ReplyCallback>,
+}
+
+#[cw_serde]
+pub struct ReplyCallback {
+    pub callback_id: u32,
+    pub ibc_channel: String,
+}
+
+#[cw_serde]
+pub enum ExecuteMsgHook {
+    ExecuteMsgReplyCallback(ExecuteMsgReplyCallbackMsg),
+}
+
+#[cw_serde]
+pub struct ExecuteMsgReplyCallbackMsg {
+    pub events: Vec<Event>,
 }
 
 #[cw_serde]
