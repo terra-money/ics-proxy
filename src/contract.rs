@@ -1,3 +1,4 @@
+use crate::ibc_hooks::{Coin, MsgTransfer};
 use crate::state::{ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
 use crate::ContractError::Std;
 use crate::{
@@ -7,14 +8,14 @@ use crate::{
 use crate::{ContractError, ExecuteMsgsMsg, UpdateOwnerMsg, UpdateWhitelistMsg};
 use cosmwasm_std::CosmosMsg::Stargate;
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Event, IbcMsg, IbcTimeout,
-    MessageInfo, Reply, Response, StdError, StdResult, SubMsg, Timestamp,
+    entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Reply, Response,
+    StdError, StdResult, SubMsg, SubMsgResult,
 };
 use prost::Message;
-use CosmosMsg::Ibc;
-use IbcMsg::SendPacket;
+use ContractError::Unauthorized;
+use ExecuteMsgHook::ExecuteMsgReplyCallback;
 
-const EXECUTE_MSG_CALLBACK_REPLY_ID: u64 = 1 << 32;
+const EXECUTE_MSG_CALLBACK_REPLY_ID: u64 = 1;
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -54,10 +55,7 @@ pub fn instantiate(
         .add_messages(msg.msgs.unwrap_or(vec![]))
         .add_attribute("action", "instantiate")
         .add_attribute("contract_addr", env.contract.address)
-        .add_attribute(
-            "owner",
-            owner.unwrap_or(Addr::unchecked(Addr::unchecked("None"))),
-        )
+        .add_attribute("owner", owner.unwrap_or(Addr::unchecked("None")))
         .add_attribute("whitelist", serde_json_wasm::to_string(&whitelist)?))
 }
 
@@ -72,7 +70,6 @@ pub fn execute(
         ExecuteMsg::ExecuteMsgs(data) => execute_msgs(deps, env, info, data),
         ExecuteMsg::UpdateWhitelist(data) => update_whitelist(deps, env, info, data),
         ExecuteMsg::UpdateOwner(data) => update_owner(deps, env, info, data),
-        ExecuteMsg::ExecuteMsgCallback(data) => execute_msg_callback(deps, env, info, data),
     }
 }
 
@@ -88,16 +85,24 @@ pub fn execute_msgs(
         None => {}
         Some(whitelist) => {
             if !whitelist.contains(&info.sender) {
-                return Err(ContractError::Unauthorized {});
+                return Err(Unauthorized {});
             }
         }
+    }
+
+    // we cast index below to u32, so we need to verify they will be in supported range
+    if msg.msgs.len() > u32::MAX as usize {
+        return Err(StdError::generic_err(format!(
+            "Messages array too long, must be shorter than {}",
+            u32::MAX
+        ))
+        .into());
     }
 
     let submsgs = msg
         .msgs
         .into_iter()
         .enumerate()
-        // TODO: verify vector length is < u32.MAX, otherwise casting usize to u32 below will panic
         .map(|(index, msg)| map_msg_info_to_submsg(deps.branch(), &info, index as u32, msg))
         .collect::<Result<Vec<SubMsg>, ContractError>>()?;
 
@@ -115,13 +120,18 @@ fn map_msg_info_to_submsg(
     match msg.reply_callback {
         None => Ok(SubMsg::new(msg.msg)),
         Some(reply_callback) => {
+            let receiver = match reply_callback.receiver {
+                None => info.sender.to_string(),
+                Some(receiver) => receiver,
+            };
             ACTIVE_REPLY_CALLBACKS.save(
                 deps.storage,
                 index,
                 &ReplyCallbackInfo {
                     callback_id: reply_callback.callback_id,
-                    receiver: info.sender.clone(),
+                    receiver,
                     channel_id: reply_callback.ibc_channel,
+                    denom: reply_callback.denom,
                 },
             )?;
 
@@ -144,10 +154,10 @@ pub fn update_whitelist(
     let config = CONFIG.load(deps.storage)?;
 
     match config.owner.clone() {
-        None => return Err(ContractError::Unauthorized {}),
+        None => return Err(Unauthorized {}),
         Some(owner) => {
             if info.sender != owner {
-                return Err(ContractError::Unauthorized {});
+                return Err(Unauthorized {});
             }
         }
     }
@@ -187,10 +197,10 @@ pub fn update_owner(
     let config = CONFIG.load(deps.storage)?;
 
     match config.owner.clone() {
-        None => return Err(ContractError::Unauthorized {}),
+        None => return Err(Unauthorized {}),
         Some(owner) => {
             if info.sender != owner {
-                return Err(ContractError::Unauthorized {});
+                return Err(Unauthorized {});
             }
         }
     }
@@ -213,15 +223,6 @@ pub fn update_owner(
         .add_attribute("owner", serde_json_wasm::to_string(&updated_owner)?))
 }
 
-pub fn execute_msg_callback(
-    _deps: DepsMut,
-    _env: Env,
-    _info: MessageInfo,
-    _msg: ExecuteMsgReplyCallbackMsg,
-) -> Result<Response, ContractError> {
-    Ok(Response::new().add_attribute("action", "execute_msg_callback"))
-}
-
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
     to_binary("")
@@ -233,25 +234,35 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
 
     match contract_reply_id {
         EXECUTE_MSG_CALLBACK_REPLY_ID => {
-            let callback_index = msg.id as u32; // TODO: this should just truncate the leading bits, right? test this
+            // truncate the leading 32 bits to get the callback index
+            let callback_index = msg.id as u32;
 
-            let reply_callback = ACTIVE_REPLY_CALLBACKS.load(deps.storage, callback_index)?; // TODO: handle case when not found gracefully
+            let reply_callback = ACTIVE_REPLY_CALLBACKS
+                .may_load(deps.storage, callback_index)?
+                .ok_or_else(|| {
+                    StdError::generic_err(
+                        "invalid state: reply callback info not found, but expected",
+                    )
+                })?;
 
-            // TODO: ofc, don't force unwrap here, check for results properly
-            let events = msg.result.unwrap().events;
-
-            // TODO: do we even care about replies to local chain? if so, discern in 'execute_msgs' whether it's local or not, and write down in ReplyCallbackInfo to use here
-            let callback_msg = SubMsg::new(Ibc(SendPacket {
-                channel_id: reply_callback.channel_id.clone(),
-                data: to_binary(&encode_callback_msg(
-                    &env,
-                    events,
-                    reply_callback.receiver.to_string(),
-                    reply_callback.channel_id,
-                )?)?,
-                timeout: IbcTimeout::with_timestamp(Timestamp::from_nanos(u64::MAX)), // TODO: no timeout, right?
-            }));
-            Ok(Response::new().add_submessage(callback_msg))
+            match msg.result {
+                SubMsgResult::Ok(response) => {
+                    // TODO: do we even care about replies to local chain? if so, how do we reliably discern if it's local or not?
+                    let callback_msg = SubMsg::new(Stargate {
+                        type_url: "/ibc.applications.transfer.v1.MsgTransfer".to_string(),
+                        value: encode_callback_msg(
+                            &env,
+                            response.events,
+                            response.data,
+                            reply_callback.receiver,
+                            reply_callback.channel_id,
+                            reply_callback.denom,
+                        )?,
+                    });
+                    Ok(Response::new().add_submessage(callback_msg))
+                }
+                SubMsgResult::Err(err) => Err(Std(StdError::generic_err(err))),
+            }
         }
         _ => Err(Std(StdError::generic_err(format!(
             "unknown reply id: {}",
@@ -260,48 +271,15 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
     }
 }
 
-// TODO: move somewhere else
-#[derive(Clone, PartialEq, prost::Message)]
-struct Coin {
-    #[prost(string, tag = "1")]
-    pub denom: String,
-
-    #[prost(string, tag = "2")]
-    pub amount: String,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-struct MsgTransfer {
-    #[prost(string, tag = "1")]
-    pub source_port: String,
-
-    #[prost(string, tag = "2")]
-    pub source_channel: String,
-
-    #[prost(message, tag = "3")]
-    pub token: Option<Coin>,
-
-    #[prost(string, tag = "4")]
-    pub sender: String,
-
-    #[prost(string, tag = "5")]
-    pub receiver: String,
-
-    #[prost(uint64, tag = "7")]
-    pub timeout_timestamp: u64,
-
-    #[prost(string, tag = "8")]
-    pub memo: String,
-}
-
 fn encode_callback_msg(
     env: &Env,
     events: Vec<Event>,
+    data: Option<Binary>,
     receiver: String,
     channel: String,
-) -> Result<String, ContractError> {
-    let callback_msg =
-        ExecuteMsgHook::ExecuteMsgReplyCallback(ExecuteMsgReplyCallbackMsg { events });
+    denom: String,
+) -> Result<Binary, ContractError> {
+    let callback_msg = ExecuteMsgReplyCallback(ExecuteMsgReplyCallbackMsg { events, data });
 
     let memo = format!(
         "{{\"wasm\":{{\"contract\":\"{}\",\"msg\":{}}}}}",
@@ -309,23 +287,22 @@ fn encode_callback_msg(
         serde_json_wasm::to_string(&callback_msg)?
     );
 
+    let current_time = env.block.time;
+
     let msg = MsgTransfer {
         source_port: "transfer".to_string(),
         source_channel: channel,
-        token: None,
+        token: Some(Coin {
+            denom,
+            amount: "1".to_string(),
+        }),
         sender: env.contract.address.to_string(),
         receiver,
-        timeout_timestamp: u64::MAX, // TODO: again no timeout, right?
+        timeout_timestamp: current_time.plus_minutes(15).nanos(),
         memo,
-    }
-    .encode_to_vec();
+    };
 
-    let msg = serde_json_wasm::to_string(&Stargate::<String> {
-        type_url: "/ibc.applications.transfer.v1.MsgTransfer".to_string(),
-        value: msg.into(),
-    })?;
-
-    Ok(msg)
+    Ok(msg.encode_to_vec().into())
 }
 
 pub fn migrate(

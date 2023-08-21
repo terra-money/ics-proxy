@@ -1,5 +1,6 @@
 pub mod contract;
 mod error;
+pub mod ibc_hooks;
 pub mod state;
 
 #[cfg(test)]
@@ -8,7 +9,7 @@ mod tests;
 pub use crate::error::ContractError;
 
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, CosmosMsg, Event};
+use cosmwasm_std::{Addr, Binary, CosmosMsg, Event};
 
 #[cw_serde]
 pub struct Config {
@@ -28,8 +29,6 @@ pub enum ExecuteMsg {
     ExecuteMsgs(ExecuteMsgsMsg),
     UpdateWhitelist(UpdateWhitelistMsg),
     UpdateOwner(UpdateOwnerMsg),
-
-    ExecuteMsgCallback(ExecuteMsgReplyCallbackMsg),
 }
 
 #[cw_serde]
@@ -47,6 +46,9 @@ pub struct ExecuteMsgInfo {
 pub struct ReplyCallback {
     pub callback_id: u32,
     pub ibc_channel: String,
+    // denom to send back when replying
+    pub denom: String,
+    pub receiver: Option<String>,
 }
 
 #[cw_serde]
@@ -57,6 +59,7 @@ pub enum ExecuteMsgHook {
 #[cw_serde]
 pub struct ExecuteMsgReplyCallbackMsg {
     pub events: Vec<Event>,
+    pub data: Option<Binary>,
 }
 
 #[cw_serde]
@@ -68,9 +71,6 @@ pub struct UpdateWhitelistMsg {
 pub struct UpdateOwnerMsg {
     pub owner: Option<String>,
 }
-
-#[cw_serde]
-pub struct ExecuteWasmMsg {}
 
 #[cw_serde]
 pub enum QueryMsg {}
