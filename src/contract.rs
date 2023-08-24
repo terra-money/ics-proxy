@@ -1,11 +1,12 @@
-use crate::ibc_hooks::{Coin, MsgTransfer};
-use crate::state::{ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
-use crate::ContractError::Std;
-use crate::{
-    Config, ExecuteMsg, ExecuteMsgHook, ExecuteMsgInfo, ExecuteMsgReplyCallbackMsg, InstantiateMsg,
-    QueryMsg,
+use crate::api::{
+    ExecuteMsgInfo, ExecuteMsgReplyCallbackMsg, ExecuteMsgsMsg, UpdateOwnerMsg, UpdateWhitelistMsg,
 };
-use crate::{ContractError, ExecuteMsgsMsg, UpdateOwnerMsg, UpdateWhitelistMsg};
+use crate::error::ContractError;
+use crate::error::ContractError::Std;
+use crate::ibc_hooks::{Coin, MsgTransfer};
+use crate::msg::ExecuteMsgHook::ExecuteMsgReplyCallback;
+use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::state::{Config, ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
 use cosmwasm_std::CosmosMsg::Stargate;
 use cosmwasm_std::{
     entry_point, to_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Reply, Response,
@@ -13,7 +14,6 @@ use cosmwasm_std::{
 };
 use prost::Message;
 use ContractError::Unauthorized;
-use ExecuteMsgHook::ExecuteMsgReplyCallback;
 
 const EXECUTE_MSG_CALLBACK_REPLY_ID: u64 = 1;
 

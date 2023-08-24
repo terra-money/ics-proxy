@@ -1,5 +1,12 @@
-use crate::{cw_serde, Config};
+use cosmwasm_schema::cw_serde;
+use cosmwasm_std::CanonicalAddr;
 use cw_storage_plus::{Item, Map};
+
+#[cw_serde]
+pub struct Config {
+    pub owner: Option<CanonicalAddr>,
+    pub whitelist: Option<Vec<CanonicalAddr>>,
+}
 
 pub const CONFIG: Item<Config> = Item::new("config");
 
@@ -14,5 +21,5 @@ pub struct ReplyCallbackInfo {
     pub denom: String,
 }
 
-// TODO: send a 'finalize' msg to self to clear this before the next caller of executemsgs
+// TODO: send a 'finalize' msg to self to clear this before the next caller of executemsgs?
 pub const ACTIVE_REPLY_CALLBACKS: Map<u32, ReplyCallbackInfo> = Map::new("active_reply_callbacks");
