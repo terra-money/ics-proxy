@@ -4,6 +4,7 @@ use cw_storage_plus::{Item, Map};
 
 #[cw_serde]
 pub struct Config {
+    pub allow_cross_chain_msgs: bool,
     pub owner: Option<CanonicalAddr>,
     pub whitelist: Option<Vec<CanonicalAddr>>,
 }

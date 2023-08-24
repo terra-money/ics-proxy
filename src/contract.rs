@@ -9,8 +9,8 @@ use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{Config, ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
 use cosmwasm_std::CosmosMsg::Stargate;
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Reply, Response,
-    StdError, StdResult, SubMsg, SubMsgResult,
+    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo, Reply,
+    Response, StdError, StdResult, SubMsg, SubMsgResult,
 };
 use prost::Message;
 use ContractError::Unauthorized;
@@ -46,6 +46,7 @@ pub fn instantiate(
     CONFIG.save(
         deps.storage,
         &Config {
+            allow_cross_chain_msgs: msg.allow_cross_chain_msgs,
             owner: owner.clone(),
             whitelist: whitelist.clone(),
         },
@@ -109,7 +110,15 @@ pub fn execute_msgs(
         .msgs
         .into_iter()
         .enumerate()
-        .map(|(index, msg)| map_msg_info_to_submsg(deps.branch(), &info, index as u32, msg))
+        .map(|(index, msg)| {
+            map_msg_info_to_submsg(
+                deps.branch(),
+                &info,
+                config.allow_cross_chain_msgs,
+                index as u32,
+                msg,
+            )
+        })
         .collect::<Result<Vec<SubMsg>, ContractError>>()?;
 
     Ok(Response::new()
@@ -120,9 +129,33 @@ pub fn execute_msgs(
 fn map_msg_info_to_submsg(
     deps: DepsMut,
     info: &MessageInfo,
+    allow_cross_chain_msgs: bool,
     index: u32,
     msg: ExecuteMsgInfo,
 ) -> Result<SubMsg, ContractError> {
+    // if cross-chain msgs aren't allowed, we need to fail if this is a cross-chain msg
+    if !allow_cross_chain_msgs {
+        match msg.msg {
+            CosmosMsg::Custom(_) | Stargate { .. } | CosmosMsg::Ibc(_) => {
+                // those messages are IBC, and not allowed - fail
+                // note: Custom is also not allowed, since it could be a cross-chain message
+                return Err(Std(StdError::generic_err("Message type not allowed")));
+            }
+            CosmosMsg::Bank(_)
+            | CosmosMsg::Staking(_)
+            | CosmosMsg::Distribution(_)
+            | CosmosMsg::Wasm(_)
+            | CosmosMsg::Gov(_) => {
+                // no-op, those are allowed
+            }
+            _ => {
+                return Err(Std(StdError::generic_err(
+                    "Message type unknown, potentially not allowed",
+                )));
+            }
+        }
+    };
+
     match msg.reply_callback {
         None => Ok(SubMsg::new(msg.msg)),
         Some(reply_callback) => {
@@ -185,8 +218,8 @@ pub fn update_whitelist(
     CONFIG.save(
         deps.storage,
         &Config {
-            owner: config.owner,
             whitelist: updated_whitelist.clone(),
+            ..config
         },
     )?;
 
@@ -221,7 +254,7 @@ pub fn update_owner(
         deps.storage,
         &Config {
             owner: updated_owner.clone(),
-            whitelist: config.whitelist,
+            ..config
         },
     )?;
 
