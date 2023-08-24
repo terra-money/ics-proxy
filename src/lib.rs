@@ -9,12 +9,12 @@ mod tests;
 pub use crate::error::ContractError;
 
 use cosmwasm_schema::cw_serde;
-use cosmwasm_std::{Addr, Binary, CosmosMsg, Event};
+use cosmwasm_std::{Binary, CanonicalAddr, CosmosMsg, Event};
 
 #[cw_serde]
 pub struct Config {
-    pub owner: Option<Addr>,
-    pub whitelist: Option<Vec<Addr>>,
+    pub owner: Option<CanonicalAddr>,
+    pub whitelist: Option<Vec<CanonicalAddr>>,
 }
 
 #[cw_serde]
@@ -45,6 +45,7 @@ pub struct ExecuteMsgInfo {
 #[cw_serde]
 pub struct ReplyCallback {
     pub callback_id: u32,
+    pub ibc_port: String,
     pub ibc_channel: String,
     // denom to send back when replying
     pub denom: String,
@@ -58,6 +59,7 @@ pub enum ExecuteMsgHook {
 
 #[cw_serde]
 pub struct ExecuteMsgReplyCallbackMsg {
+    pub callback_id: u32,
     pub events: Vec<Event>,
     pub data: Option<Binary>,
 }

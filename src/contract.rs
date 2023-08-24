@@ -8,7 +8,7 @@ use crate::{
 use crate::{ContractError, ExecuteMsgsMsg, UpdateOwnerMsg, UpdateWhitelistMsg};
 use cosmwasm_std::CosmosMsg::Stargate;
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, Binary, Deps, DepsMut, Env, Event, MessageInfo, Reply, Response,
+    entry_point, to_binary, Binary, Deps, DepsMut, Env, Event, MessageInfo, Reply, Response,
     StdError, StdResult, SubMsg, SubMsgResult,
 };
 use prost::Message;
@@ -26,14 +26,14 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     let owner = match msg.owner {
         None => None,
-        Some(owner) => Some(deps.api.addr_validate(&owner)?),
+        Some(owner) => Some(deps.api.addr_canonicalize(&owner)?),
     };
     let whitelist = match msg.whitelist {
         None => None,
         Some(whitelist) => {
             let mut result = vec![];
             for account in whitelist {
-                result.push(deps.api.addr_validate(&account)?)
+                result.push(deps.api.addr_canonicalize(&account)?)
             }
             if owner.is_some() {
                 result.push(owner.clone().unwrap())
@@ -55,7 +55,12 @@ pub fn instantiate(
         .add_messages(msg.msgs.unwrap_or(vec![]))
         .add_attribute("action", "instantiate")
         .add_attribute("contract_addr", env.contract.address)
-        .add_attribute("owner", owner.unwrap_or(Addr::unchecked("None")))
+        .add_attribute(
+            "owner",
+            owner
+                .map(|addr| addr.to_string())
+                .unwrap_or("None".to_string()),
+        )
         .add_attribute("whitelist", serde_json_wasm::to_string(&whitelist)?))
 }
 
@@ -84,7 +89,8 @@ pub fn execute_msgs(
     match config.whitelist {
         None => {}
         Some(whitelist) => {
-            if !whitelist.contains(&info.sender) {
+            let canonical_sender = deps.api.addr_canonicalize(info.sender.as_ref())?;
+            if !whitelist.contains(&canonical_sender) {
                 return Err(Unauthorized {});
             }
         }
@@ -130,6 +136,7 @@ fn map_msg_info_to_submsg(
                 &ReplyCallbackInfo {
                     callback_id: reply_callback.callback_id,
                     receiver,
+                    port_id: reply_callback.ibc_port,
                     channel_id: reply_callback.ibc_channel,
                     denom: reply_callback.denom,
                 },
@@ -156,7 +163,7 @@ pub fn update_whitelist(
     match config.owner.clone() {
         None => return Err(Unauthorized {}),
         Some(owner) => {
-            if info.sender != owner {
+            if deps.api.addr_canonicalize(info.sender.as_ref())? != owner {
                 return Err(Unauthorized {});
             }
         }
@@ -167,7 +174,7 @@ pub fn update_whitelist(
         Some(whitelist) => {
             let mut result = vec![];
             for account in whitelist {
-                result.push(deps.api.addr_validate(&account)?)
+                result.push(deps.api.addr_canonicalize(&account)?)
             }
             result.push(config.owner.clone().unwrap());
             result.dedup();
@@ -199,7 +206,7 @@ pub fn update_owner(
     match config.owner.clone() {
         None => return Err(Unauthorized {}),
         Some(owner) => {
-            if info.sender != owner {
+            if deps.api.addr_canonicalize(info.sender.as_ref())? != owner {
                 return Err(Unauthorized {});
             }
         }
@@ -207,7 +214,7 @@ pub fn update_owner(
 
     let updated_owner = match msg.owner {
         None => None,
-        Some(owner) => Some(deps.api.addr_validate(&owner)?),
+        Some(owner) => Some(deps.api.addr_canonicalize(&owner)?),
     };
 
     CONFIG.save(
@@ -252,9 +259,11 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                         type_url: "/ibc.applications.transfer.v1.MsgTransfer".to_string(),
                         value: encode_callback_msg(
                             &env,
+                            callback_index,
                             response.events,
                             response.data,
                             reply_callback.receiver,
+                            reply_callback.port_id,
                             reply_callback.channel_id,
                             reply_callback.denom,
                         )?,
@@ -271,15 +280,22 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_callback_msg(
     env: &Env,
+    callback_id: u32,
     events: Vec<Event>,
     data: Option<Binary>,
     receiver: String,
+    port: String,
     channel: String,
     denom: String,
 ) -> Result<Binary, ContractError> {
-    let callback_msg = ExecuteMsgReplyCallback(ExecuteMsgReplyCallbackMsg { events, data });
+    let callback_msg = ExecuteMsgReplyCallback(ExecuteMsgReplyCallbackMsg {
+        callback_id,
+        events,
+        data,
+    });
 
     let memo = format!(
         "{{\"wasm\":{{\"contract\":\"{}\",\"msg\":{}}}}}",
@@ -290,7 +306,7 @@ fn encode_callback_msg(
     let current_time = env.block.time;
 
     let msg = MsgTransfer {
-        source_port: "transfer".to_string(),
+        source_port: port,
         source_channel: channel,
         token: Some(Coin {
             denom,

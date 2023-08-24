@@ -7,6 +7,7 @@ pub const CONFIG: Item<Config> = Item::new("config");
 pub struct ReplyCallbackInfo {
     pub callback_id: u32,
     pub receiver: String,
+    pub port_id: String,
     pub channel_id: String,
     // denom to send back, as IBC hooks won't work without a coin sent back
     // will generally be the local chain's IBC denom for uluna
