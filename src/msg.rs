@@ -1,5 +1,7 @@
-use crate::api::{ExecuteMsgReplyCallbackMsg, ExecuteMsgsMsg, UpdateOwnerMsg, UpdateWhitelistMsg};
-use cosmwasm_schema::cw_serde;
+use crate::api::{
+    ConfigResponse, ExecuteMsgReplyCallbackMsg, ExecuteMsgsMsg, UpdateOwnerMsg, UpdateWhitelistMsg,
+};
+use cosmwasm_schema::{cw_serde, QueryResponses};
 use cosmwasm_std::CosmosMsg;
 
 #[cw_serde]
@@ -25,7 +27,11 @@ pub enum ExecuteMsgHook {
 }
 
 #[cw_serde]
-pub enum QueryMsg {}
+#[derive(QueryResponses)]
+pub enum QueryMsg {
+    #[returns(ConfigResponse)]
+    Config {},
+}
 
 #[cw_serde]
 pub struct MigrateMsg {}

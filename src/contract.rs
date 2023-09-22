@@ -1,8 +1,9 @@
 use crate::api::{
-    ExecuteMsgInfo, ExecuteMsgReplyCallbackMsg, ExecuteMsgsMsg, UpdateOwnerMsg, UpdateWhitelistMsg,
+    ConfigResponse, ExecuteMsgInfo, ExecuteMsgReplyCallbackMsg, ExecuteMsgsMsg, UpdateOwnerMsg,
+    UpdateWhitelistMsg,
 };
-use crate::error::ContractError;
 use crate::error::ContractError::Std;
+use crate::error::{ContractError, ContractResult};
 use crate::ibc_hooks::{Coin, MsgTransfer};
 use crate::msg::ExecuteMsgHook::ExecuteMsgReplyCallback;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
@@ -10,7 +11,7 @@ use crate::state::{Config, ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
 use cosmwasm_std::CosmosMsg::Stargate;
 use cosmwasm_std::{
     entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo, Reply,
-    Response, StdError, StdResult, SubMsg, SubMsgResult,
+    Response, StdError, SubMsg, SubMsgResult,
 };
 use prost::Message;
 use ContractError::Unauthorized;
@@ -264,8 +265,18 @@ pub fn update_owner(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn query(_deps: Deps, _env: Env, _msg: QueryMsg) -> StdResult<Binary> {
-    to_binary("")
+pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> ContractResult<Binary> {
+    let response = match msg {
+        QueryMsg::Config {} => to_binary(&query_config(deps)?)?,
+    };
+
+    Ok(response)
+}
+
+pub fn query_config(deps: Deps) -> ContractResult<ConfigResponse> {
+    let config = CONFIG.load(deps.storage)?;
+
+    Ok(ConfigResponse { config })
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]

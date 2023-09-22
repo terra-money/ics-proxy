@@ -1,3 +1,4 @@
+use crate::state::Config;
 use cosmwasm_schema::cw_serde;
 use cosmwasm_std::{Binary, CosmosMsg, Event};
 
@@ -37,4 +38,11 @@ pub struct UpdateWhitelistMsg {
 #[cw_serde]
 pub struct UpdateOwnerMsg {
     pub owner: Option<String>,
+}
+
+// Responses
+
+#[cw_serde]
+pub struct ConfigResponse {
+    pub config: Config,
 }
