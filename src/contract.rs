@@ -30,14 +30,19 @@ pub fn instantiate(
         Some(owner) => Some(deps.api.addr_canonicalize(&owner)?),
     };
     let whitelist = match msg.whitelist {
-        None => None,
+        None => Some(
+            owner
+                .as_ref()
+                .map(|owner| vec![owner.clone()])
+                .unwrap_or_default(),
+        ),
         Some(whitelist) => {
             let mut result = vec![];
             for account in whitelist {
                 result.push(deps.api.addr_canonicalize(&account)?)
             }
-            if owner.is_some() {
-                result.push(owner.clone().unwrap())
+            if let Some(owner) = owner.clone() {
+                result.push(owner);
             }
             result.dedup();
             Some(result)
