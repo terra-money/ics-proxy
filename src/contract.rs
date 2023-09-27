@@ -27,19 +27,14 @@ pub fn instantiate(
 ) -> Result<Response, ContractError> {
     let owner = match msg.owner {
         None => None,
-        Some(owner) => Some(deps.api.addr_canonicalize(&owner)?),
+        Some(owner) => Some(deps.api.addr_validate(&owner)?),
     };
     let whitelist = match msg.whitelist {
-        None => Some(
-            owner
-                .as_ref()
-                .map(|owner| vec![owner.clone()])
-                .unwrap_or_default(),
-        ),
+        None => owner.as_ref().map(|owner| vec![owner.clone()]),
         Some(whitelist) => {
             let mut result = vec![];
             for account in whitelist {
-                result.push(deps.api.addr_canonicalize(&account)?)
+                result.push(deps.api.addr_validate(&account)?)
             }
             if let Some(owner) = owner.clone() {
                 result.push(owner);
@@ -96,8 +91,8 @@ pub fn execute_msgs(
     match config.whitelist {
         None => {}
         Some(whitelist) => {
-            let canonical_sender = deps.api.addr_canonicalize(info.sender.as_ref())?;
-            if !whitelist.contains(&canonical_sender) {
+            let sender = deps.api.addr_validate(info.sender.as_ref())?;
+            if !whitelist.contains(&sender) {
                 return Err(Unauthorized {});
             }
         }
@@ -202,7 +197,7 @@ pub fn update_whitelist(
     match config.owner.clone() {
         None => return Err(Unauthorized {}),
         Some(owner) => {
-            if deps.api.addr_canonicalize(info.sender.as_ref())? != owner {
+            if deps.api.addr_validate(info.sender.as_ref())? != owner {
                 return Err(Unauthorized {});
             }
         }
@@ -213,7 +208,7 @@ pub fn update_whitelist(
         Some(whitelist) => {
             let mut result = vec![];
             for account in whitelist {
-                result.push(deps.api.addr_canonicalize(&account)?)
+                result.push(deps.api.addr_validate(&account)?)
             }
             result.push(config.owner.clone().unwrap());
             result.dedup();
@@ -245,7 +240,7 @@ pub fn update_owner(
     match config.owner.clone() {
         None => return Err(Unauthorized {}),
         Some(owner) => {
-            if deps.api.addr_canonicalize(info.sender.as_ref())? != owner {
+            if deps.api.addr_validate(info.sender.as_ref())? != owner {
                 return Err(Unauthorized {});
             }
         }
@@ -253,7 +248,7 @@ pub fn update_owner(
 
     let updated_owner = match msg.owner {
         None => None,
-        Some(owner) => Some(deps.api.addr_canonicalize(&owner)?),
+        Some(owner) => Some(deps.api.addr_validate(&owner)?),
     };
 
     CONFIG.save(
@@ -308,7 +303,7 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                         type_url: "/ibc.applications.transfer.v1.MsgTransfer".to_string(),
                         value: encode_callback_msg(
                             &env,
-                            callback_index,
+                            reply_callback.callback_id,
                             response.events,
                             response.data,
                             reply_callback.receiver,
