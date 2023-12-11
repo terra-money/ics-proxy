@@ -4,14 +4,14 @@ use crate::api::{
 };
 use crate::error::ContractError::Std;
 use crate::error::{ContractError, ContractResult};
-use crate::ibc_hooks::{Coin, MsgTransfer};
+use crate::ibc_hooks::{derive_intermediate_sender, Coin, IbcFee, MsgTransfer};
 use crate::msg::ExecuteMsgHook::ExecuteMsgReplyCallback;
 use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
 use crate::state::{Config, ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
 use cosmwasm_std::CosmosMsg::Stargate;
 use cosmwasm_std::{
-    entry_point, to_binary, Binary, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo, Reply,
-    Response, StdError, SubMsg, SubMsgResult,
+    entry_point, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo,
+    Reply, Response, StdError, SubMsg, SubMsgResult, WasmMsg,
 };
 use prost::Message;
 use ContractError::Unauthorized;
@@ -48,8 +48,10 @@ pub fn instantiate(
         deps.storage,
         &Config {
             allow_cross_chain_msgs: msg.allow_cross_chain_msgs,
+            allow_any_msg: msg.allow_any_msg.unwrap_or(true),
             owner: owner.clone(),
             whitelist: whitelist.clone(),
+            chain_prefix: msg.chain_prefix,
         },
     )?;
 
@@ -115,7 +117,9 @@ pub fn execute_msgs(
             map_msg_info_to_submsg(
                 deps.branch(),
                 &info,
+                config.allow_any_msg,
                 config.allow_cross_chain_msgs,
+                config.owner.clone().unwrap_or(Addr::unchecked("")),
                 index as u32,
                 msg,
             )
@@ -130,12 +134,43 @@ pub fn execute_msgs(
 fn map_msg_info_to_submsg(
     deps: DepsMut,
     info: &MessageInfo,
+    allow_any_msg: bool,
     allow_cross_chain_msgs: bool,
+    owner: Addr,
     index: u32,
-    msg: ExecuteMsgInfo,
+    mut msg: ExecuteMsgInfo,
 ) -> Result<SubMsg, ContractError> {
+    let config = CONFIG.load(deps.storage)?;
+    if !allow_any_msg && info.sender != owner {
+        msg.msg = match msg.msg.clone() {
+            CosmosMsg::Wasm(msg) => match msg.clone() {
+                WasmMsg::Instantiate {
+                    admin,
+                    code_id,
+                    msg,
+                    funds,
+                    label,
+                } => {
+                    if !funds.is_empty() {
+                        return Err(Std(StdError::generic_err("Cannot spend funds")));
+                    }
+                    CosmosMsg::Wasm(WasmMsg::Instantiate {
+                        admin,
+                        code_id,
+                        msg,
+                        funds,
+                        label,
+                    })
+                }
+                _ => return Err(Std(StdError::generic_err("Message type not allowed"))),
+            },
+            _ => {
+                return Err(Std(StdError::generic_err("Message type not allowed")));
+            }
+        }
+    };
     // if cross-chain msgs aren't allowed, we need to fail if this is a cross-chain msg
-    if !allow_cross_chain_msgs {
+    if !allow_cross_chain_msgs && info.sender != owner {
         match msg.msg {
             CosmosMsg::Custom(_) | Stargate { .. } | CosmosMsg::Ibc(_) => {
                 // those messages are IBC, and not allowed - fail
@@ -155,14 +190,28 @@ fn map_msg_info_to_submsg(
                 )));
             }
         }
-    };
+    }
 
     match msg.reply_callback {
         None => Ok(SubMsg::new(msg.msg)),
         Some(reply_callback) => {
             let receiver = match reply_callback.receiver {
                 None => info.sender.to_string(),
-                Some(receiver) => receiver,
+                Some(receiver) => {
+                    if receiver != info.sender
+                        && receiver
+                            != derive_intermediate_sender(
+                                &reply_callback.ibc_channel,
+                                info.sender.as_str(),
+                                config.chain_prefix.as_str(),
+                            )?
+                    {
+                        return Err(Std(StdError::generic_err(
+                            "Callback receiver must be sender or intermediate to sender.",
+                        )));
+                    }
+                    receiver
+                }
             };
             ACTIVE_REPLY_CALLBACKS.save(
                 deps.storage,
@@ -300,7 +349,7 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                 SubMsgResult::Ok(response) => {
                     // TODO: do we even care about replies to local chain? if so, how do we reliably discern if it's local or not?
                     let callback_msg = SubMsg::new(Stargate {
-                        type_url: "/ibc.applications.transfer.v1.MsgTransfer".to_string(),
+                        type_url: "/neutron.transfer.MsgTransfer".to_string(),
                         value: encode_callback_msg(
                             &env,
                             reply_callback.callback_id,
@@ -358,18 +407,70 @@ fn encode_callback_msg(
         }),
         sender: env.contract.address.to_string(),
         receiver,
-        timeout_timestamp: current_time.plus_minutes(15).nanos(),
+        timeout_timestamp: current_time.plus_seconds(900).nanos(), //15 mins
         memo,
+        fee: Some(IbcFee {
+            recv_fee: vec![Coin {
+                denom: "untrn".to_string(),
+                amount: "0".to_string(),
+            }],
+            ack_fee: vec![Coin {
+                denom: "untrn".to_string(),
+                amount: "100000".to_string(),
+            }],
+            timeout_fee: vec![Coin {
+                denom: "untrn".to_string(),
+                amount: "100000".to_string(),
+            }],
+        }),
     };
 
     Ok(msg.encode_to_vec().into())
 }
 
-pub fn migrate(
-    _deps: DepsMut,
-    _env: Env,
-    _info: MessageInfo,
-    _msg: ExecuteMsg,
-) -> Result<Response, ContractError> {
+#[cfg_attr(not(feature = "library"), entry_point)]
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: ExecuteMsg) -> Result<Response, ContractError> {
     Ok(Response::new())
+}
+
+#[test]
+fn test() {
+    let msg = MsgTransfer {
+        source_port: "transfer".to_string(),
+        source_channel: "channel-25".to_string(),
+        token: Some(Coin {
+            denom: "ibc/322C86EB54A505E28AFE380CED1721FA61E9580A7548A16B9DCF6E7C8CEE43D5"
+                .to_string(),
+            amount: "1".to_string(),
+        }),
+        sender: "neutron148v8fce500wksal76mk4tp48kjftuvz43rt9mkfrxwruyt5z6aus3ct2d0".to_string(),
+        receiver: "terra1a8dxkrapwj4mkpfnrv7vahd0say0lxvd0ft6qv".to_string(),
+        timeout_timestamp: 1702079837488000000, //15 mins
+        memo: "test".to_string(),
+        fee: Some(IbcFee {
+            recv_fee: vec![Coin {
+                denom: "untrn".to_string(),
+                amount: "0".to_string(),
+            }],
+            ack_fee: vec![Coin {
+                denom: "untrn".to_string(),
+                amount: "100000".to_string(),
+            }],
+            timeout_fee: vec![Coin {
+                denom: "untrn".to_string(),
+                amount: "100000".to_string(),
+            }],
+        }),
+    };
+    let sg = ExecuteMsgsMsg {
+        msgs: vec![ExecuteMsgInfo {
+            msg: Stargate {
+                type_url: "/neutron.transfer.MsgTransfer".to_string(),
+                value: msg.encode_to_vec().into(),
+            },
+            reply_callback: None,
+        }],
+    };
+
+    print!("{}", serde_json_wasm::to_string(&sg).unwrap())
 }

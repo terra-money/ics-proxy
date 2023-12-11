@@ -1,5 +1,5 @@
 use cosmwasm_std::StdError;
-use serde_json_wasm::ser::Error;
+
 use thiserror::Error;
 
 pub type ContractResult<T> = Result<T, ContractError>;
@@ -14,7 +14,13 @@ pub enum ContractError {
 }
 
 impl From<serde_json_wasm::ser::Error> for ContractError {
-    fn from(value: Error) -> Self {
+    fn from(value: serde_json_wasm::ser::Error) -> Self {
+        ContractError::Std(StdError::generic_err(value.to_string()))
+    }
+}
+
+impl From<bech32_no_std::Error> for ContractError {
+    fn from(value: bech32_no_std::Error) -> Self {
         ContractError::Std(StdError::generic_err(value.to_string()))
     }
 }
