@@ -56,7 +56,6 @@ pub fn derive_intermediate_sender(
     bech32_prefix: &str,
 ) -> Result<String, bech32_no_std::Error> {
     let sender_path = format!("{channel}/{original_sender}");
-
     let sender_hash_32 = prefixed_sha256(SENDER_PREFIX, &sender_path);
 
     bech32_no_std::encode(bech32_prefix, sender_hash_32.to_base32())
@@ -74,4 +73,17 @@ pub fn prefixed_sha256(prefix: &str, address: &str) -> [u8; 32] {
     hasher.update(address.as_bytes());
 
     hasher.finalize().into()
+}
+
+#[test]
+fn test() {
+    print!(
+        "{}",
+        derive_intermediate_sender(
+            "channel-25",
+            "terra1e3nwdhttet5hhkv45yne9mdh0vn45gnptcnv7383xhcl3jj5sczq2sfayt",
+            "NEUTRON"
+        )
+        .unwrap()
+    )
 }

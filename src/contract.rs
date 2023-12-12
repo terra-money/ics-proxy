@@ -6,17 +6,18 @@ use crate::error::ContractError::Std;
 use crate::error::{ContractError, ContractResult};
 use crate::ibc_hooks::{derive_intermediate_sender, Coin, IbcFee, MsgTransfer};
 use crate::msg::ExecuteMsgHook::ExecuteMsgReplyCallback;
-use crate::msg::{ExecuteMsg, InstantiateMsg, QueryMsg};
+use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{Config, ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
 use cosmwasm_std::CosmosMsg::Stargate;
 use cosmwasm_std::{
-    entry_point, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo,
-    Reply, Response, StdError, SubMsg, SubMsgResult, WasmMsg,
+    entry_point, to_binary, Addr, Binary, CosmosMsg, Deps, DepsMut, Env, Event, MessageInfo, Reply,
+    Response, StdError, SubMsg, SubMsgResult, WasmMsg,
 };
 use prost::Message;
 use ContractError::Unauthorized;
 
 const EXECUTE_MSG_CALLBACK_REPLY_ID: u64 = 1;
+const TERRA_PREFIX: &str = "TERRA";
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -51,7 +52,7 @@ pub fn instantiate(
             allow_any_msg: msg.allow_any_msg.unwrap_or(true),
             owner: owner.clone(),
             whitelist: whitelist.clone(),
-            chain_prefix: msg.chain_prefix,
+            terra_chain_channel: msg.terra_chain_channel,
         },
     )?;
 
@@ -195,15 +196,15 @@ fn map_msg_info_to_submsg(
     match msg.reply_callback {
         None => Ok(SubMsg::new(msg.msg)),
         Some(reply_callback) => {
-            let receiver = match reply_callback.receiver {
+            let _receiver = match reply_callback.receiver {
                 None => info.sender.to_string(),
                 Some(receiver) => {
                     if receiver != info.sender
                         && receiver
                             != derive_intermediate_sender(
-                                &reply_callback.ibc_channel,
+                                &config.terra_chain_channel,
                                 info.sender.as_str(),
-                                config.chain_prefix.as_str(),
+                                TERRA_PREFIX,
                             )?
                     {
                         return Err(Std(StdError::generic_err(
@@ -218,7 +219,7 @@ fn map_msg_info_to_submsg(
                 index,
                 &ReplyCallbackInfo {
                     callback_id: reply_callback.callback_id,
-                    receiver,
+                    receiver: info.sender.to_string(),
                     port_id: reply_callback.ibc_port,
                     channel_id: reply_callback.ibc_channel,
                     denom: reply_callback.denom,
@@ -429,7 +430,7 @@ fn encode_callback_msg(
 }
 
 #[cfg_attr(not(feature = "library"), entry_point)]
-pub fn migrate(_deps: DepsMut, _env: Env, _msg: ExecuteMsg) -> Result<Response, ContractError> {
+pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
     Ok(Response::new())
 }
 

@@ -8,7 +8,7 @@ pub struct Config {
     pub allow_any_msg: bool,
     pub owner: Option<Addr>,
     pub whitelist: Option<Vec<Addr>>,
-    pub chain_prefix: String,
+    pub terra_chain_channel: String,
 }
 
 pub const CONFIG: Item<Config> = Item::new("config");

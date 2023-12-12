@@ -10,7 +10,7 @@ pub struct InstantiateMsg {
     /// Mainly used to prevent fake reports of this contract's callbacks.
     pub allow_cross_chain_msgs: bool,
     pub allow_any_msg: Option<bool>,
-    pub chain_prefix: String,
+    pub terra_chain_channel: String,
     pub owner: Option<String>,
     pub whitelist: Option<Vec<String>>,
     pub msgs: Option<Vec<CosmosMsg>>,
