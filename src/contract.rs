@@ -17,7 +17,6 @@ use prost::Message;
 use ContractError::Unauthorized;
 
 const EXECUTE_MSG_CALLBACK_REPLY_ID: u64 = 1;
-const TERRA_PREFIX: &str = "TERRA";
 
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn instantiate(
@@ -53,11 +52,12 @@ pub fn instantiate(
             owner: owner.clone(),
             whitelist: whitelist.clone(),
             terra_chain_channel: msg.terra_chain_channel,
+            local_chain_bech32_prefix: msg.local_chain_bech32_prefix,
         },
     )?;
 
     Ok(Response::new()
-        .add_messages(msg.msgs.unwrap_or(vec![]))
+        .add_messages(msg.msgs.unwrap_or_default())
         .add_attribute("action", "instantiate")
         .add_attribute("contract_addr", env.contract.address)
         .add_attribute(
@@ -196,15 +196,15 @@ fn map_msg_info_to_submsg(
     match msg.reply_callback {
         None => Ok(SubMsg::new(msg.msg)),
         Some(reply_callback) => {
-            let _receiver = match reply_callback.receiver {
+            let receiver = match reply_callback.receiver {
                 None => info.sender.to_string(),
                 Some(receiver) => {
                     if receiver != info.sender
-                        && receiver
+                        && info.sender
                             != derive_intermediate_sender(
                                 &config.terra_chain_channel,
-                                info.sender.as_str(),
-                                TERRA_PREFIX,
+                                &receiver,
+                                &config.local_chain_bech32_prefix,
                             )?
                     {
                         return Err(Std(StdError::generic_err(
@@ -219,7 +219,7 @@ fn map_msg_info_to_submsg(
                 index,
                 &ReplyCallbackInfo {
                     callback_id: reply_callback.callback_id,
-                    receiver: info.sender.to_string(),
+                    receiver,
                     port_id: reply_callback.ibc_port,
                     channel_id: reply_callback.ibc_channel,
                     denom: reply_callback.denom,

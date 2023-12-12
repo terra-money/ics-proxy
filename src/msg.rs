@@ -11,6 +11,7 @@ pub struct InstantiateMsg {
     pub allow_cross_chain_msgs: bool,
     pub allow_any_msg: Option<bool>,
     pub terra_chain_channel: String,
+    pub local_chain_bech32_prefix: String,
     pub owner: Option<String>,
     pub whitelist: Option<Vec<String>>,
     pub msgs: Option<Vec<CosmosMsg>>,
