@@ -4,7 +4,7 @@ use crate::api::{
 };
 use crate::error::ContractError::Std;
 use crate::error::{ContractError, ContractResult};
-use crate::ibc_hooks::{derive_intermediate_sender, Coin, IbcFee, MsgTransfer};
+use crate::ibc_hooks::{derive_intermediate_sender, Coin, MsgTransfer};
 use crate::msg::ExecuteMsgHook::ExecuteMsgReplyCallback;
 use crate::msg::{ExecuteMsg, InstantiateMsg, MigrateMsg, QueryMsg};
 use crate::state::{Config, ReplyCallbackInfo, ACTIVE_REPLY_CALLBACKS, CONFIG};
@@ -350,7 +350,7 @@ pub fn reply(deps: DepsMut, env: Env, msg: Reply) -> Result<Response, ContractEr
                 SubMsgResult::Ok(response) => {
                     // TODO: do we even care about replies to local chain? if so, how do we reliably discern if it's local or not?
                     let callback_msg = SubMsg::new(Stargate {
-                        type_url: "/neutron.transfer.MsgTransfer".to_string(),
+                        type_url: "/ibc.applications.transfer.v1.MsgTransfer".to_string(),
                         value: encode_callback_msg(
                             &env,
                             reply_callback.callback_id,
@@ -410,20 +410,6 @@ fn encode_callback_msg(
         receiver,
         timeout_timestamp: current_time.plus_seconds(900).nanos(), //15 mins
         memo,
-        fee: Some(IbcFee {
-            recv_fee: vec![Coin {
-                denom: "untrn".to_string(),
-                amount: "0".to_string(),
-            }],
-            ack_fee: vec![Coin {
-                denom: "untrn".to_string(),
-                amount: "100000".to_string(),
-            }],
-            timeout_fee: vec![Coin {
-                denom: "untrn".to_string(),
-                amount: "100000".to_string(),
-            }],
-        }),
     };
 
     Ok(msg.encode_to_vec().into())
@@ -432,46 +418,4 @@ fn encode_callback_msg(
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn migrate(_deps: DepsMut, _env: Env, _msg: MigrateMsg) -> Result<Response, ContractError> {
     Ok(Response::new())
-}
-
-#[test]
-fn test() {
-    let msg = MsgTransfer {
-        source_port: "transfer".to_string(),
-        source_channel: "channel-25".to_string(),
-        token: Some(Coin {
-            denom: "ibc/322C86EB54A505E28AFE380CED1721FA61E9580A7548A16B9DCF6E7C8CEE43D5"
-                .to_string(),
-            amount: "1".to_string(),
-        }),
-        sender: "neutron148v8fce500wksal76mk4tp48kjftuvz43rt9mkfrxwruyt5z6aus3ct2d0".to_string(),
-        receiver: "terra1a8dxkrapwj4mkpfnrv7vahd0say0lxvd0ft6qv".to_string(),
-        timeout_timestamp: 1702079837488000000, //15 mins
-        memo: "test".to_string(),
-        fee: Some(IbcFee {
-            recv_fee: vec![Coin {
-                denom: "untrn".to_string(),
-                amount: "0".to_string(),
-            }],
-            ack_fee: vec![Coin {
-                denom: "untrn".to_string(),
-                amount: "100000".to_string(),
-            }],
-            timeout_fee: vec![Coin {
-                denom: "untrn".to_string(),
-                amount: "100000".to_string(),
-            }],
-        }),
-    };
-    let sg = ExecuteMsgsMsg {
-        msgs: vec![ExecuteMsgInfo {
-            msg: Stargate {
-                type_url: "/neutron.transfer.MsgTransfer".to_string(),
-                value: msg.encode_to_vec().into(),
-            },
-            reply_callback: None,
-        }],
-    };
-
-    print!("{}", serde_json_wasm::to_string(&sg).unwrap())
 }

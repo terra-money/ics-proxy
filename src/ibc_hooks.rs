@@ -32,21 +32,6 @@ pub struct MsgTransfer {
 
     #[prost(string, tag = "8")]
     pub memo: String,
-
-    #[prost(message, tag = "9")]
-    pub fee: Option<IbcFee>,
-}
-
-#[derive(Clone, PartialEq, prost::Message)]
-pub struct IbcFee {
-    #[prost(message, repeated, tag = "1")]
-    pub recv_fee: Vec<Coin>,
-
-    #[prost(message, repeated, tag = "2")]
-    pub ack_fee: Vec<Coin>,
-
-    #[prost(message, repeated, tag = "3")]
-    pub timeout_fee: Vec<Coin>,
 }
 
 const SENDER_PREFIX: &str = "ibc-wasm-hook-intermediary";
@@ -73,17 +58,4 @@ pub fn prefixed_sha256(prefix: &str, address: &str) -> [u8; 32] {
     hasher.update(address.as_bytes());
 
     hasher.finalize().into()
-}
-
-#[test]
-fn test() {
-    print!(
-        "{}",
-        derive_intermediate_sender(
-            "channel-25",
-            "terra1e3nwdhttet5hhkv45yne9mdh0vn45gnptcnv7383xhcl3jj5sczq2sfayt",
-            "NEUTRON"
-        )
-        .unwrap()
-    )
 }
