@@ -8,7 +8,7 @@ pub struct Config {
     pub allow_any_msg: bool,
     pub owner: Option<Addr>,
     pub whitelist: Option<Vec<Addr>>,
-    /// channel-id for transfer packets, Terra -> local chain (what we use for src_channel on Terra)
+    /// channel-id for transfer packets, local chain -> Terra (what we use for dest_channel on Terra)
     pub terra_chain_channel: String,
     /// Address prefix for the chain this proxy is deployed to
     pub local_chain_bech32_prefix: String,

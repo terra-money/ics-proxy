@@ -10,6 +10,7 @@ pub struct InstantiateMsg {
     /// Mainly used to prevent fake reports of this contract's callbacks.
     pub allow_cross_chain_msgs: bool,
     pub allow_any_msg: Option<bool>,
+    /// channel-id for transfer packets, local chain -> Terra (what we use for dest_channel on Terra)
     pub terra_chain_channel: String,
     pub local_chain_bech32_prefix: String,
     pub owner: Option<String>,
